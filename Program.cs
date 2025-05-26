@@ -16,12 +16,15 @@ using iTextSharp.text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Org.BouncyCastle.Asn1.X509;
 
 public class Program
 {
    
     static Dictionary<long, string> UserStates = new();
     static DataBaseService dataBaseService;
+    static Dictionary<long, UserExtractedData> UserExtractedInfo = new();
+
     private static readonly string botToken = Env.GetString("BOT_TOKEN");
     private static readonly string dbConnection = Env.GetString("DB_CONNECTION");
     private static readonly string mistralApiKey = Env.GetString("MISTRAL_API_KEY");
@@ -67,6 +70,7 @@ public class Program
                 Console.WriteLine($"Отримано повідомлення від {message.Chat.Id}. Тип: {message.Type}");
 
                 long userId = message.Chat.Id;
+                UserStates[userId] = "awaiting_car_document";
 
                 if (message.Type == MessageType.Text)
                 {
@@ -113,6 +117,8 @@ public class Program
 
                             Console.WriteLine($"Отримано паспорт користувача {userId}, розмір: {imageData.Length} байт");
                             var (success, document, error) = await CallMindeeApiPassportAsync(imageData);
+                            
+
 
                             if (!success)
                             {
@@ -134,6 +140,11 @@ public class Program
 
                             string extractedInfo = $"Паспортні дані:\nІм'я: {firstName}\nПрізвище: {lastName}\nНомер документа: {docNumber}\n\n" +
                                                    "Підтвердіть, будь ласка, чи все правильно?";
+                            if (!UserExtractedInfo.ContainsKey(userId))
+                                UserExtractedInfo[userId] = new UserExtractedData();
+                            UserExtractedInfo[userId].FirstName = firstName;
+                            UserExtractedInfo[userId].LastName = lastName;
+                            UserExtractedInfo[userId].PassportNumber = docNumber;
 
                             var keyboard = new InlineKeyboardMarkup(new[]
                             {
@@ -186,10 +197,19 @@ public class Program
 
                             string year = prediction.Fields.ContainsKey("year") ?
                                 prediction.Fields["year"].ToString() : "невідомо";
+                            
+
 
                             string extractedInfo = $"Дані з техпаспорту:\nНомер: {registrationPlate}\nМарка: {vehicleMake}\nМодель: {vehicleModel}\nVIN: {vin}\nРік випуску: {year}\n\n" +
                                 $"Підтвердіть, будь ласка, чи все правильно?";
+                            if (!UserExtractedInfo.ContainsKey(userId))
+                                UserExtractedInfo[userId] = new UserExtractedData();
 
+                            UserExtractedInfo[userId].CarNumber = registrationPlate;
+                            UserExtractedInfo[userId].CarBrand = vehicleMake;
+                            UserExtractedInfo[userId].CarModel = vehicleModel;
+                            UserExtractedInfo[userId].CarVin = vin;
+                            UserExtractedInfo[userId].CarYear = year;
                             var keyboard = new InlineKeyboardMarkup(new[]
                             {
                             new[]
@@ -264,8 +284,28 @@ public class Program
                         await botClient.DeleteMessage(chatId: callback.Message.Chat.Id,messageId: callback.Message.MessageId,cancellationToken: token); await botClient.AnswerCallbackQuery(callback.Id, "Вітаю! Ви придбали страховий поліс!");
                         await botClient.SendMessage(userId, "Дякуємо за покупку! Ваш страховий поліс оформлено.", cancellationToken: token);
                         await botClient.SendMessage(userId, "Генерую страховий поліс, зачекайте...");
+                        var info = UserExtractedInfo[userId];
 
-                        string insuranceText = await GenerateInsuranceTextFromMistral();
+                        string prompt = $"Користувач хоче оформити страховий поліс:\n" +
+                                        $"Ім'я: {info.FirstName}\nПрізвище: {info.LastName}\nПаспорт: {info.PassportNumber}\n" +
+                                        $"Авто: {info.CarBrand} {info.CarModel} ({info.CarYear})\nНомер: {info.CarNumber}, VIN: {info.CarVin}\n" +
+                                        $"Сформуй дані для створення страхового полісу.";
+
+
+
+                        var SaveData = UserExtractedInfo[userId];
+
+                        string insuranceText = await GenerateInsuranceTextFromMistral(
+                            SaveData.FirstName,
+                            SaveData.LastName,
+                            SaveData.PassportNumber,
+                            SaveData.CarNumber,
+                            SaveData.CarBrand,
+                            SaveData.CarModel,
+                            SaveData.CarVin,
+                            SaveData.CarYear,
+                            DateTime.Now
+                            );
                         Console.WriteLine(insuranceText);
                         if (string.IsNullOrEmpty(insuranceText))
                         {
@@ -377,8 +417,29 @@ public class Program
             return (false, null, $"Сталася помилка: {ex.Message}");
         }
     }
-    static private async Task<string> GenerateInsuranceTextFromMistral()
-    {
+static private async Task<string> GenerateInsuranceTextFromMistral(string firstName, string lastName, string passportNumber, string carNumber, string carBrand, string carModel, string carVin, string carYear, DateTime startDate)
+{
+        string prompt = $@"
+Згенеруй на англійській офіційний текст договору автострахування на основі таких даних:
+
+🔹 Паспортні дані:
+- Ім’я: {firstName}
+- Прізвище: {lastName}
+- Номер документа: {passportNumber}
+
+🔹 Дані транспортного засобу:
+- Номер: {carNumber}
+- Марка: {carBrand}
+- Модель: {carModel}
+- VIN: {carVin}
+- Рік випуску: {carYear}
+
+🔹 Умови страхування:
+- Дата початку: {startDate:dd.MM.yyyy}
+- Термін дії: 1 рік
+
+Створи короткий і юридично правильний текст договору автострахування. Українською мовою.";
+
         var requestBody = new
         {
             model = "mistral-tiny",
@@ -387,7 +448,7 @@ public class Program
             new
             {
                 role = "user",
-                content = "Згенеруй типовий текст страхового полісу для автомобіля на англійській."
+                content = prompt
             }
         },
             max_tokens = 500
@@ -399,7 +460,6 @@ public class Program
         requestMessage.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
         var response = await httpClient.SendAsync(requestMessage);
-
         var responseJson = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
