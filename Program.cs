@@ -419,7 +419,7 @@ public class Program
 static private async Task<string> GenerateInsuranceTextFromMistral(string firstName, string lastName, string passportNumber, string carNumber, string carBrand, string carModel, string carVin, string carYear, DateTime startDate)
 {
         string prompt = $@"
-Згенеруй на англійській офіційний текст договору автострахування на основі таких даних:
+Згенеруй на англійській офіційний текст договору автострахування з такими данними в ньому:
 
 🔹 Паспортні дані:
 - Ім’я: {firstName}
