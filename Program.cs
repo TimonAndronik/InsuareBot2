@@ -70,7 +70,6 @@ public class Program
                 Console.WriteLine($"Отримано повідомлення від {message.Chat.Id}. Тип: {message.Type}");
 
                 long userId = message.Chat.Id;
-                UserStates[userId] = "awaiting_car_document";
 
                 if (message.Type == MessageType.Text)
                 {
