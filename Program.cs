@@ -17,9 +17,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
-class Program
-{        
-    static Dictionary<long,String> UserStates = new();
+public class Program
+{
+   
+    static Dictionary<long, string> UserStates = new();
     static DataBaseService dataBaseService;
     private static readonly string botToken = Env.GetString("BOT_TOKEN");
     private static readonly string dbConnection = Env.GetString("DB_CONNECTION");
@@ -29,7 +30,7 @@ class Program
 
     static async Task Main(string[] args)
     {
-       System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         Env.Load();
 
         var builder = WebApplication.CreateBuilder(args);
@@ -55,7 +56,6 @@ class Program
             Console.WriteLine("Бот запущено.");
         }
 
-        // Запускаємо веб-сервер
         app.Run($"http://0.0.0.0:{port}");
     }
     static async Task HandleUpdate(ITelegramBotClient botClient, Update update, CancellationToken token)
